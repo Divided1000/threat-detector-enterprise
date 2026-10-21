@@ -190,6 +190,18 @@ def test_reverse_shell_fires_critical():
     findings = detect_suspicious_outbound([e])
     assert len(findings) == 1
     assert findings[0].severity == "critical"
+    # reverse shell => Protocol Tunneling (the network channel), not T1059
+    assert findings[0].attack_technique == "T1572"
+
+
+def test_plain_outbound_maps_to_app_layer_protocol():
+    e = falco("Unexpected outbound connection",
+              process="curl http://example.com",
+              output_fields={"fd.sip": "93.184.216.34"})
+    findings = detect_suspicious_outbound([e])
+    assert len(findings) == 1
+    assert findings[0].severity == "high"
+    assert findings[0].attack_technique == "T1071"
 
 
 # --- full engine over a mixed stream ---------------------------------------

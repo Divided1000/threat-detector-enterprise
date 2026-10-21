@@ -1,5 +1,7 @@
 # Threat Detection Pipeline
 
+[![CI](https://github.com/Divided1000/threat-detector-enterprise/actions/workflows/ci.yml/badge.svg)](https://github.com/Divided1000/threat-detector-enterprise/actions/workflows/ci.yml)
+
 A cloud-native threat detection pipeline that ingests security logs, detects suspicious
 activity using rules mapped to [MITRE ATT&CK](https://attack.mitre.org/), and generates
 prioritized, enriched alerts.
@@ -28,9 +30,9 @@ detection and the alerting layer treat them identically.
 
 - **Phase 1** — Core pipeline on synthetic CloudTrail logs
 - **Phase 2** — Falco (Kubernetes runtime) source, runtime detection rules, live-cluster verification on minikube, and alert dedup
-- **Phase 3** — AI-assisted triage layer, 24 unit tests, and polish
+- **Phase 3** — AI-assisted triage layer, unit tests, and polish
 
-9 detection rules across cloud-audit and runtime telemetry, 24 unit tests,
+9 detection rules across cloud-audit and runtime telemetry, 25 unit tests,
 runnable with zero external dependencies or secrets.
 
 ## Detection rules
@@ -49,15 +51,28 @@ they never match cloud-audit events (and vice versa) — no source checks needed
 | `K8S_SENSITIVE_FILE_READ` | Falco | T1552.001 | Unsecured Credentials: Credentials In Files | high |
 | `K8S_PACKAGE_MGMT` | Falco | T1105 | Ingress Tool Transfer | medium |
 | `K8S_WRITE_BELOW_ETC` | Falco | T1053.003 / T1222 | Scheduled Task/Job: Cron (else File Permissions Mod) | critical (cron) / high |
-| `K8S_SUSPICIOUS_OUTBOUND` | Falco | T1059 | Command and Scripting Interpreter | critical (reverse shell) / high |
+| `K8S_SUSPICIOUS_OUTBOUND` | Falco | T1572 / T1071 | Protocol Tunneling (reverse shell) / Application Layer Protocol | critical (reverse shell) / high |
 
 Several severities are context-dependent — e.g. an access key created by root is
 critical, by a regular user medium; a write under `/etc/cron.*` is critical,
 elsewhere under `/etc` high.
 
+**A note on two mappings a reviewer might question:**
+
+- `K8S_SUSPICIOUS_OUTBOUND` maps to the *network* technique, not `T1059`: a
+  reverse shell is tunneling an interactive session out to a C2 host
+  (**T1572 Protocol Tunneling**); other unexpected egress is **T1071 Application
+  Layer Protocol**. The shell interpreter itself is already covered by
+  `K8S_SHELL_IN_CONTAINER` (T1059), so mapping this rule to the connection
+  avoids double-counting T1059.
+- `K8S_PACKAGE_MGMT` → **T1105 Ingress Tool Transfer**: a package manager in a
+  running container pulls binaries from an external repo into the workload at
+  runtime, which is the tool-transfer behavior T1105 describes.
+
 ## Quick start
 
-No dependencies, no secrets — just Python 3.11+:
+No dependencies, no secrets — just Python 3.9+ (the core uses only the standard
+library; developed and tested on 3.14):
 
 ```bash
 git clone https://github.com/Divided1000/threat-detector-enterprise
@@ -71,6 +86,9 @@ pass, and prints prioritized, triaged alerts. It also writes machine-readable
 output to `data/alerts.json`.
 
 ### Sample output
+
+> The events below come from **synthetic sample data** (`data/sample_*.json`).
+> Timestamps are illustrative, not real incidents.
 
 A single alert as rendered to the console:
 
@@ -186,12 +204,47 @@ python3 -m venv .venv
 
 Covers every detection rule (fires on malicious input, stays silent on benign),
 a regression test for the read-vs-write false positive, dedup behavior, and the
-triage fallback path.
+rule-based triage path. Note: the tests exercise the **deterministic fallback**;
+the LLM call itself is not tested end-to-end (see [Limitations](#limitations)).
+
+CI runs the pipeline smoke test and the full suite on Python 3.9 and 3.12 via
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) — no
+secrets required, which is why the whole thing runs in CI unchanged.
+
+## Adding a detection rule
+
+A detection is just a function `list[NormalizedEvent] -> list[Finding]`,
+registered in `ALL_DETECTIONS`. Because it reads the common schema, it works
+against any source (CloudTrail, Falco, or a future one) automatically:
+
+```python
+# src/detections.py
+def detect_disable_cloudtrail(events: list[NormalizedEvent]) -> list[Finding]:
+    """T1562.001 - Impair Defenses: Disable or Modify Tools."""
+    findings = []
+    for e in events:
+        if e.action == "StopLogging":            # CloudTrail turned off
+            findings.append(Finding(
+                rule_id="CLOUDTRAIL_DISABLED",
+                title="CloudTrail logging stopped",
+                severity="critical",
+                attack_technique="T1562.001",
+                attack_name="Impair Defenses: Disable or Modify Tools",
+                description=f"{e.actor} stopped CloudTrail logging.",
+                actor=e.actor,
+                events=[e],
+            ))
+    return findings
+
+ALL_DETECTIONS.append(detect_disable_cloudtrail)   # register it
+```
+
+That's the whole extension point — no changes to ingest, alerting, or triage.
 
 ## Project layout
 
 ```
-threat-detection-pipeline/
+threat-detector-enterprise/
 ├── run.py                  # entrypoint: wires the pipeline together
 ├── src/
 │   ├── schema.py           # the common event schema (normalization target)

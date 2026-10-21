@@ -259,9 +259,11 @@ def detect_sensitive_file_read(events: list[NormalizedEvent]) -> list[Finding]:
 def detect_package_mgmt_in_container(events: list[NormalizedEvent]) -> list[Finding]:
     """
     T1105 - Ingress Tool Transfer.
-    Running a package manager (apt-get, yum, apk, pip) inside a running container
-    means someone is pulling in new tools at runtime -- containers should be
-    immutable. Common precursor to installing attacker tooling.
+    Rationale: a package manager in a running container fetches binaries from an
+    external repo into the workload at runtime -- i.e. transferring new tools
+    into the environment, which is what T1105 describes. Containers are meant to
+    be immutable, so this is both anomalous and a common precursor to installing
+    attacker tooling (netcat, nmap, etc.).
     """
     PKG_MGRS = ("apt-get", "apt", "yum", "dnf", "apk", "pip", "pip3", "npm")
     findings: list[Finding] = []
@@ -327,8 +329,16 @@ def detect_write_below_etc(events: list[NormalizedEvent]) -> list[Finding]:
 
 def detect_suspicious_outbound(events: list[NormalizedEvent]) -> list[Finding]:
     """
-    T1071 / T1059 - reverse shell / C2 over an unexpected outbound connection.
-    netcat / bash piped to a socket is a textbook reverse shell.
+    Unexpected egress from a container.
+
+    ATT&CK mapping (chosen for the *connection*, not the shell):
+      - Reverse shell (nc -e, bash -i, /dev/tcp) => T1572 Protocol Tunneling.
+        The attacker tunnels an interactive session out over a network socket to
+        a C2 host; T1572 describes exactly this channel. (The shell interpreter
+        itself is T1059, already covered by the shell-in-container rule, so we
+        map this rule to the network behavior to avoid double-counting T1059.)
+      - Other unexpected egress => T1071 Application Layer Protocol, the generic
+        "attacker communicates outbound over a standard protocol" technique.
     """
     findings: list[Finding] = []
     for e in events:
@@ -345,13 +355,14 @@ def detect_suspicious_outbound(events: list[NormalizedEvent]) -> list[Finding]:
                     rule_id="K8S_SUSPICIOUS_OUTBOUND",
                     title=f"Suspicious outbound connection from {e.container or 'container'}",
                     severity="critical" if looks_like_revshell else "high",
-                    attack_technique="T1059",
-                    attack_name="Command and Scripting Interpreter",
+                    attack_technique="T1572" if looks_like_revshell else "T1071",
+                    attack_name="Protocol Tunneling" if looks_like_revshell else "Application Layer Protocol",
                     description=(
                         f"Process '{e.process}' opened an outbound connection"
                         + (f" to {dst}" if dst else "")
                         + f" from {_k8s_where(e)}. "
-                        + ("Command pattern matches a reverse shell." if looks_like_revshell
+                        + ("Command pattern matches a reverse shell (interactive session "
+                           "tunneled out to a C2 host)." if looks_like_revshell
                            else "Unexpected egress from a container.")
                     ),
                     actor=e.actor,
