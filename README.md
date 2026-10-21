@@ -7,9 +7,9 @@ prioritized, enriched alerts.
 ## What it does
 
 ```
-SOURCES            PIPELINE                                   OUTPUT
-CloudTrail  ──▶  ingest → normalize → detect → triage ──▶  prioritized,
-Falco (K8s) ──▶     (common schema)   (ATT&CK)   (AI)        triaged alerts
+SOURCES            PIPELINE                                        OUTPUT
+CloudTrail  ──▶  ingest → normalize → detect → triage ──────▶  prioritized,
+Falco (K8s) ──▶     (common schema)   (ATT&CK) (playbook/LLM)    triaged alerts
 ```
 
 Both sources flow through a single detection pass. Cloud-audit (CloudTrail)
@@ -24,32 +24,97 @@ detection and the alerting layer treat them identically.
 
 ## Status
 
-- [x] Phase 1 — Core pipeline on synthetic CloudTrail logs
-- [x] Phase 2 — Multi-source + prioritization
-  - [x] Falco (Kubernetes runtime) source added, normalized into the common schema
-  - [x] Runtime detection rules mapped to ATT&CK (shell-in-container, credential access, tool transfer, persistence, reverse shell)
-  - [x] Live Falco from a real cluster — verified end to end on minikube (see below)
-  - [x] Alert dedup (collapses repeat activity into one alert with a merged time window)
-- [x] Phase 3 — AI-assisted triage layer + tests + polish
+**Complete.** All three roadmap phases are done:
 
-9 detection rules across cloud-audit and runtime, 24 unit tests, runnable with
-zero external dependencies or secrets.
+- **Phase 1** — Core pipeline on synthetic CloudTrail logs
+- **Phase 2** — Falco (Kubernetes runtime) source, runtime detection rules, live-cluster verification on minikube, and alert dedup
+- **Phase 3** — AI-assisted triage layer, 24 unit tests, and polish
+
+9 detection rules across cloud-audit and runtime telemetry, 24 unit tests,
+runnable with zero external dependencies or secrets.
+
+## Detection rules
+
+Every rule operates on the common schema and is mapped to a MITRE ATT&CK
+technique. Runtime rules only fire on events that carry container context, so
+they never match cloud-audit events (and vice versa) — no source checks needed.
+
+| Rule ID | Source | ATT&CK | Technique | Severity |
+|---|---|---|---|---|
+| `BRUTE_FORCE_LOGIN` | CloudTrail | T1110 | Brute Force | high |
+| `ROOT_CONSOLE_LOGIN` | CloudTrail | T1078.004 | Valid Accounts: Cloud Accounts | high |
+| `IAM_POLICY_CHANGE` | CloudTrail | T1098 | Account Manipulation | critical |
+| `ACCESS_KEY_CREATED` | CloudTrail | T1098 | Account Manipulation | critical (root) / medium |
+| `K8S_SHELL_IN_CONTAINER` | Falco | T1059 | Command and Scripting Interpreter | high |
+| `K8S_SENSITIVE_FILE_READ` | Falco | T1552.001 | Unsecured Credentials: Credentials In Files | high |
+| `K8S_PACKAGE_MGMT` | Falco | T1105 | Ingress Tool Transfer | medium |
+| `K8S_WRITE_BELOW_ETC` | Falco | T1053.003 / T1222 | Scheduled Task/Job: Cron (else File Permissions Mod) | critical (cron) / high |
+| `K8S_SUSPICIOUS_OUTBOUND` | Falco | T1059 | Command and Scripting Interpreter | critical (reverse shell) / high |
+
+Several severities are context-dependent — e.g. an access key created by root is
+critical, by a regular user medium; a write under `/etc/cron.*` is critical,
+elsewhere under `/etc` high.
 
 ## Quick start
 
+No dependencies, no secrets — just Python 3.11+:
+
 ```bash
-cd threat-detection-pipeline
+git clone https://github.com/Divided1000/threat-detector-enterprise
+cd threat-detector-enterprise
 python3 run.py
 ```
 
 This ingests the sample logs at `data/sample_cloudtrail.json` (cloud audit) and
 `data/sample_falco.json` (Kubernetes runtime), runs both through one detection
-pass, and prints the prioritized alerts it generates.
+pass, and prints prioritized, triaged alerts. It also writes machine-readable
+output to `data/alerts.json`.
+
+### Sample output
+
+A single alert as rendered to the console:
+
+```
+1. [CRIT] (score 100)  IAM policy attached to user 'attacker'
+     MITRE ATT&CK : T1098 - Account Manipulation
+     Source       : cloudtrail
+     Actor        : Root
+     Source IP(s) : 192.0.2.200
+     Evidence     : 1 event(s), 2026-10-20T15:14:20+00:00 -> 2026-10-20T15:14:20+00:00
+     Detail       : Root (Root) attached policy 'AdminAccess' to user 'attacker'. Possible privilege escalation or persistence.
+     ── Triage (rule-based) ──
+     What happened: IAM policy attached to user 'attacker' from 192.0.2.200. Actor: Root. Mapped to MITRE T1098 (Account Manipulation).
+     Why it matters: Attaching a permissive policy can hand an attacker admin rights (privilege escalation) or establish durable access (persistence).
+     Do next      : Review the policy attached and whether the change was approved. Revert if unauthorized and audit what the target principal did afterward.
+```
+
+The same alert in `data/alerts.json` (machine-readable, triage note included):
+
+```json
+{
+  "priority_score": 100,
+  "severity": "critical",
+  "rule_id": "IAM_POLICY_CHANGE",
+  "title": "IAM policy attached to user 'attacker'",
+  "actor": "Root",
+  "sources": ["cloudtrail"],
+  "mitre_attack": { "technique_id": "T1098", "technique_name": "Account Manipulation" },
+  "source_ips": ["192.0.2.200"],
+  "triage": {
+    "engine": "rule-based",
+    "summary": "IAM policy attached to user 'attacker' from 192.0.2.200. Actor: Root. Mapped to MITRE T1098 (Account Manipulation).",
+    "why_it_matters": "Attaching a permissive policy can hand an attacker admin rights (privilege escalation) or establish durable access (persistence).",
+    "recommended_actions": "Review the policy attached and whether the change was approved. Revert if unauthorized and audit what the target principal did afterward."
+  }
+}
+```
 
 ## Running against a real Kubernetes cluster (live Falco)
 
 The Falco source works on synthetic samples *and* on real telemetry from a live
-cluster — same code path. Verified on minikube:
+cluster — same code path. Verified on minikube.
+
+**Prerequisites:** Docker, `minikube`, `kubectl`, and `helm`.
 
 ```bash
 # 1. cluster + Falco (modern eBPF, JSON output)
@@ -67,6 +132,7 @@ kubectl run web-frontend --image=nginx:alpine -n production
 kubectl exec -n production web-frontend -- sh -c 'cat /etc/shadow'
 
 # 4. capture Falco's real JSON alerts, then run the pipeline
+#    (grep keeps only JSON lines, dropping Falco's own startup/log chatter)
 kubectl logs -n falco -l app.kubernetes.io/name=falco -c falco --tail=1000 \
   | grep -E '^\{' > data/falco_live_capture.json
 python3 run.py            # auto-detects data/falco_live_capture.json
@@ -88,11 +154,27 @@ what happened, why it matters, and what to do. Two engines:
 
 - **Rule-based (default):** a deterministic per-rule playbook. No dependencies,
   no secrets, runs anywhere including CI.
-- **LLM-backed (optional):** set `OPENAI_API_KEY` (and optionally `TRIAGE_MODEL`,
-  default `gpt-4o-mini`) and install `openai`. The model only ever receives the
-  structured alert fields — never raw logs — so there's no secret-leak path.
-  Any API error falls back to the rule-based note; the pipeline never crashes on
-  a triage failure.
+- **LLM-backed (optional):** install the client and set a key:
+
+  ```bash
+  pip install openai           # or: uncomment the line in requirements.txt
+  export OPENAI_API_KEY=sk-...  # optional: export TRIAGE_MODEL=gpt-4o-mini (default)
+  python3 run.py
+  ```
+
+  The model only ever receives the structured alert fields — never raw logs —
+  so there's no secret-leak path. Any API error falls back to the rule-based
+  note; the pipeline never crashes on a triage failure.
+
+## Deduplication
+
+Repeated identical activity collapses into one alert instead of spamming the
+analyst with a row per event. Two findings are "the same alert" when they share
+the **same rule, same actor, and same container** (where present). Dedup
+deliberately does **not** key on time: the merged alert keeps the full evidence
+list and a time window spanning first-to-last occurrence, with an
+`evidence_count`. For example, two reads of `/etc/shadow` a minute apart in the
+same container become a single alert with `evidence_count: 2`.
 
 ## Tests
 
@@ -125,14 +207,26 @@ threat-detection-pipeline/
 │   ├── sample_falco.json        # synthetic Falco K8s runtime events (JSONL)
 │   └── falco_live_capture.json  # real Falco alerts from a live cluster (optional, gitignored)
 ├── requirements.txt        # runtime deps (optional LLM extra)
-└── requirements-dev.txt    # test deps (pytest)
+├── requirements-dev.txt    # test deps (pytest)
+└── LICENSE                 # MIT
 ```
 
-## Concepts you can speak to after building this
+## What this demonstrates
 
-- Log ingestion and normalization (the core of every SIEM)
-- MITRE ATT&CK and detection engineering
-- Alert enrichment, prioritization, dedup, and severity
-- AI-assisted triage, with a safe LLM integration (structured input only, graceful fallback)
+- Log ingestion and normalization into a common schema — the core of every SIEM
+- MITRE ATT&CK-mapped detection engineering across two telemetry types
+- Alert enrichment, prioritization, dedup, and severity scoring
+- A safe LLM integration: structured input only, deterministic fallback, no crash path
 - How cloud-audit (CloudTrail) and runtime (Falco) telemetry complement each other
 - Deploying Falco on Kubernetes and validating detections against real telemetry
+
+## Limitations
+
+- **Synthetic cloud data.** CloudTrail events are hand-authored samples, not from a live account.
+- **Point-in-time Falco capture.** The live capture is a snapshot of Falco's logs, not a streaming tail. Falco's default stable ruleset also ships some rules disabled, so not every simulated action alerts out of the box — expected behavior, not a bug.
+- **No streaming ingestion or persistence.** The pipeline is batch: read files, detect, write `alerts.json`. There's no message queue, database, or continuous processing.
+- **LLM triage is optional and untested end-to-end here** — the rule-based fallback is the verified path; the model call is wired but exercised only when a key is supplied.
+
+## License
+
+MIT — see `LICENSE`.
