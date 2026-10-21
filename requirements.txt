@@ -1,0 +1,8 @@
+# Runtime dependencies.
+#
+# The core pipeline uses only the Python standard library, so this file is
+# intentionally minimal. The AI triage layer (src/triage.py) can optionally
+# call an LLM; install the extra below and set OPENAI_API_KEY to enable it.
+# Without it, triage falls back to deterministic rule-based notes.
+
+# openai>=1.0    # uncomment to enable LLM-backed triage

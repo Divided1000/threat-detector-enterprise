@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Pipeline output / live captures (regenerated at runtime)
+data/alerts.json
+data/falco_live_capture.json

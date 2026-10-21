@@ -1,0 +1,105 @@
+{
+  "Records": [
+    {
+      "eventTime": "2026-10-20T13:58:01Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.10",
+      "userIdentity": { "type": "IAMUser", "userName": "alice" },
+      "responseElements": { "ConsoleLogin": "Success" }
+    },
+    {
+      "eventTime": "2026-10-20T14:00:11Z",
+      "eventName": "DescribeInstances",
+      "eventSource": "ec2.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.10",
+      "userIdentity": { "type": "IAMUser", "userName": "alice" },
+      "responseElements": null
+    },
+    {
+      "eventTime": "2026-10-20T14:05:22Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.77",
+      "userIdentity": { "type": "IAMUser", "userName": "bob" },
+      "responseElements": { "ConsoleLogin": "Failure" }
+    },
+    {
+      "eventTime": "2026-10-20T14:05:31Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.77",
+      "userIdentity": { "type": "IAMUser", "userName": "bob" },
+      "responseElements": { "ConsoleLogin": "Failure" }
+    },
+    {
+      "eventTime": "2026-10-20T14:05:44Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.77",
+      "userIdentity": { "type": "IAMUser", "userName": "bob" },
+      "responseElements": { "ConsoleLogin": "Failure" }
+    },
+    {
+      "eventTime": "2026-10-20T14:05:58Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.77",
+      "userIdentity": { "type": "IAMUser", "userName": "bob" },
+      "responseElements": { "ConsoleLogin": "Failure" }
+    },
+    {
+      "eventTime": "2026-10-20T14:06:10Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "198.51.100.77",
+      "userIdentity": { "type": "IAMUser", "userName": "bob" },
+      "responseElements": { "ConsoleLogin": "Success" }
+    },
+    {
+      "eventTime": "2026-10-20T15:12:03Z",
+      "eventName": "ConsoleLogin",
+      "eventSource": "signin.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.200",
+      "userIdentity": { "type": "Root" },
+      "responseElements": { "ConsoleLogin": "Success" }
+    },
+    {
+      "eventTime": "2026-10-20T15:14:20Z",
+      "eventName": "PutUserPolicy",
+      "eventSource": "iam.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.200",
+      "userIdentity": { "type": "Root" },
+      "requestParameters": { "userName": "attacker", "policyName": "AdminAccess" },
+      "responseElements": null
+    },
+    {
+      "eventTime": "2026-10-20T15:15:05Z",
+      "eventName": "CreateAccessKey",
+      "eventSource": "iam.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "192.0.2.200",
+      "userIdentity": { "type": "Root" },
+      "requestParameters": { "userName": "attacker" },
+      "responseElements": { "accessKey": { "accessKeyId": "AKIAEXAMPLE123", "status": "Active" } }
+    },
+    {
+      "eventTime": "2026-10-20T16:30:00Z",
+      "eventName": "GetObject",
+      "eventSource": "s3.amazonaws.com",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.10",
+      "userIdentity": { "type": "IAMUser", "userName": "alice" },
+      "responseElements": null
+    }
+  ]
+}
